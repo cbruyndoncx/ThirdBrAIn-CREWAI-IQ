@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/AndreVianna/CodingCrew.git
+	branch = main
+	commit = 53cb128600e0769228bf8316e87a50c263709fbb
+	parent = b96eb7d514baad3bb89d6f8286e394f38dac2f9c
+	method = merge
+	cmdver = 0.4.9
