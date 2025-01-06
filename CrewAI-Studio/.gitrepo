@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/strnad/CrewAI-Studio.git
+	branch = main
+	commit = dc23ec1156103b9aa3439937b512621d8151a7c5
+	parent = 9dc1b4583b942318b8fa8d5877adc48e3568b218
+	method = merge
+	cmdver = 0.4.9

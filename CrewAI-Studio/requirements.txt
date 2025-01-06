@@ -1,0 +1,11 @@
+crewai
+crewai-tools
+langchain
+langchain-community
+langchain-openai
+langchain-groq
+langchain-anthropic
+langchain-ollama
+streamlit
+python-dotenv
+pdfminer.six
