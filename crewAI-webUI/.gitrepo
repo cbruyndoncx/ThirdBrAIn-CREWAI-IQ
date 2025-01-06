@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/SaracenRhue/crewAI-webUI.git
+	branch = main
+	commit = b98fe7a44123ed40eb7d9530c1e74697967122f8
+	parent = 83a41487c1a89267a3b48852dcec4e5e2de4b0d9
+	method = merge
+	cmdver = 0.4.9
