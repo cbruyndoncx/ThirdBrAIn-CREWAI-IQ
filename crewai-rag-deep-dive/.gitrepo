@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/bhancockio/crewai-rag-deep-dive.git
+	branch = main
+	commit = a17d88e9575d20c76c1cf476925bc06f308cf6b4
+	parent = 6ab780e2c29010bea7a7a661d5c86ef7c75b3e4f
+	method = merge
+	cmdver = 0.4.9
