@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/jeanjerome/ai-agile-team.git
+	branch = main
+	commit = 11d85317720aa4f436cdf8aae07a811defb39916
+	parent = 4d8f37920ccdddecad584b2527f8a9ed4e844cc5
+	method = merge
+	cmdver = 0.4.9
