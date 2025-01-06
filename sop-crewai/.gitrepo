@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/wbsuh/sop-crewai.git
+	branch = main
+	commit = b7fd898d02a9567ea24ad7057b49f5cf17467241
+	parent = 369294f054570dda9241654d0ed51978cc2c85c2
+	method = merge
+	cmdver = 0.4.9
