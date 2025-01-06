@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/automationlopes/crewai_made_easy.git
+	branch = main
+	commit = 02bd9f3c367053a87539c788a43475200ffcfed2
+	parent = 1ec77d0195b0800c56dbc625797213b9afa9b0ec
+	method = merge
+	cmdver = 0.4.9
