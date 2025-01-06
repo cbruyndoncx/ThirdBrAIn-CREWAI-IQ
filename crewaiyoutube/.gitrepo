@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/fmiguelmmartins/crewaiyoutube.git
+	branch = main
+	commit = 145341d86d54869c8fc41b98fbdccb05979c4f5b
+	parent = e3443bbe12701f93bdeef2bc704d955a5620b9d5
+	method = merge
+	cmdver = 0.4.9
