@@ -1,14 +1,13 @@
-import os
+import re
 import shutil
 import subprocess
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 
 from pydantic import Field, InstanceOf, PrivateAttr, model_validator
 
 from crewai.agents import CacheHandler
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.crew_agent_executor import CrewAgentExecutor
-from crewai.cli.constants import ENV_VARS, LITELLM_PARAMS
 from crewai.knowledge.knowledge import Knowledge
 from crewai.knowledge.source.base_knowledge_source import BaseKnowledgeSource
 from crewai.knowledge.utils.knowledge_utils import extract_knowledge_context
@@ -17,29 +16,20 @@ from crewai.memory.contextual.contextual_memory import ContextualMemory
 from crewai.task import Task
 from crewai.tools import BaseTool
 from crewai.tools.agent_tools.agent_tools import AgentTools
-from crewai.tools.base_tool import Tool
 from crewai.utilities import Converter, Prompts
 from crewai.utilities.constants import TRAINED_AGENTS_DATA_FILE, TRAINING_DATA_FILE
 from crewai.utilities.converter import generate_model_description
+from crewai.utilities.events.agent_events import (
+    AgentExecutionCompletedEvent,
+    AgentExecutionErrorEvent,
+    AgentExecutionStartedEvent,
+)
+from crewai.utilities.events.crewai_event_bus import crewai_event_bus
 from crewai.utilities.llm_utils import create_llm
 from crewai.utilities.token_counter_callback import TokenCalcHandler
 from crewai.utilities.training_handler import CrewTrainingHandler
 
-agentops = None
 
-try:
-    import agentops  # type: ignore # Name "agentops" is already defined
-    from agentops import track_agent  # type: ignore
-except ImportError:
-
-    def track_agent():
-        def noop(f):
-            return f
-
-        return noop
-
-
-@track_agent()
 class Agent(BaseAgent):
     """Represents an agent in a system.
 
@@ -56,13 +46,13 @@ class Agent(BaseAgent):
             llm: The language model that will run the agent.
             function_calling_llm: The language model that will handle the tool calling for this agent, it overrides the crew function_calling_llm.
             max_iter: Maximum number of iterations for an agent to execute a task.
-            memory: Whether the agent should have memory or not.
             max_rpm: Maximum number of requests per minute for the agent execution to be respected.
             verbose: Whether the agent execution should be in verbose mode.
             allow_delegation: Whether the agent is allowed to delegate tasks to other agents.
             tools: Tools at agents disposal
             step_callback: Callback to be executed after each step of the agent execution.
             knowledge_sources: Knowledge sources for the agent.
+            embedder: Embedder configuration for the agent.
     """
 
     _times_executed: int = PrivateAttr(default=0)
@@ -72,9 +62,6 @@ class Agent(BaseAgent):
     )
     agent_ops_agent_name: str = None  # type: ignore # Incompatible types in assignment (expression has type "None", variable has type "str")
     agent_ops_agent_id: str = None  # type: ignore # Incompatible types in assignment (expression has type "None", variable has type "str")
-    cache_handler: InstanceOf[CacheHandler] = Field(
-        default=None, description="An instance of the CacheHandler class."
-    )
     step_callback: Optional[Any] = Field(
         default=None,
         description="Callback to be executed after each step of the agent execution.",
@@ -86,7 +73,7 @@ class Agent(BaseAgent):
     llm: Union[str, InstanceOf[LLM], Any] = Field(
         description="Language model that will run the agent.", default=None
     )
-    function_calling_llm: Optional[Any] = Field(
+    function_calling_llm: Optional[Union[str, InstanceOf[LLM], Any]] = Field(
         description="Language model that will run the agent.", default=None
     )
     system_template: Optional[str] = Field(
@@ -108,10 +95,6 @@ class Agent(BaseAgent):
         default=True,
         description="Keep messages under the context window size by summarizing content.",
     )
-    max_iter: int = Field(
-        default=20,
-        description="Maximum number of iterations for an agent to execute a task before giving it's best answer",
-    )
     max_retry_limit: int = Field(
         default=2,
         description="Maximum number of retries for an agent to execute a task when an error occurs.",
@@ -124,16 +107,9 @@ class Agent(BaseAgent):
         default="safe",
         description="Mode for code execution: 'safe' (using Docker) or 'unsafe' (direct execution).",
     )
-    embedder_config: Optional[Dict[str, Any]] = Field(
+    embedder: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Embedder configuration for the agent.",
-    )
-    knowledge_sources: Optional[List[BaseKnowledgeSource]] = Field(
-        default=None,
-        description="Knowledge sources for the agent.",
-    )
-    _knowledge: Optional[Knowledge] = PrivateAttr(
-        default=None,
     )
 
     @model_validator(mode="after")
@@ -142,7 +118,8 @@ class Agent(BaseAgent):
         self.agent_ops_agent_name = self.role
 
         self.llm = create_llm(self.llm)
-        self.function_calling_llm = create_llm(self.function_calling_llm)
+        if self.function_calling_llm and not isinstance(self.function_calling_llm, LLM):
+            self.function_calling_llm = create_llm(self.function_calling_llm)
 
         if not self.agent_executor:
             self._setup_agent_executor()
@@ -160,14 +137,16 @@ class Agent(BaseAgent):
     def _set_knowledge(self):
         try:
             if self.knowledge_sources:
-                knowledge_agent_name = f"{self.role.replace(' ', '_')}"
+                full_pattern = re.compile(r"[^a-zA-Z0-9\-_\r\n]|(\.\.)")
+                knowledge_agent_name = f"{re.sub(full_pattern, '_', self.role)}"
                 if isinstance(self.knowledge_sources, list) and all(
                     isinstance(k, BaseKnowledgeSource) for k in self.knowledge_sources
                 ):
-                    self._knowledge = Knowledge(
+                    self.knowledge = Knowledge(
                         sources=self.knowledge_sources,
-                        embedder_config=self.embedder_config,
+                        embedder=self.embedder,
                         collection_name=knowledge_agent_name,
+                        storage=self.knowledge_storage or None,
                     )
         except (TypeError, ValueError) as e:
             raise ValueError(f"Invalid Knowledge Configuration: {str(e)}")
@@ -201,13 +180,15 @@ class Agent(BaseAgent):
             if task.output_json:
                 # schema = json.dumps(task.output_json, indent=2)
                 schema = generate_model_description(task.output_json)
+                task_prompt += "\n" + self.i18n.slice(
+                    "formatted_task_instructions"
+                ).format(output_format=schema)
 
             elif task.output_pydantic:
                 schema = generate_model_description(task.output_pydantic)
-
-            task_prompt += "\n" + self.i18n.slice("formatted_task_instructions").format(
-                output_format=schema
-            )
+                task_prompt += "\n" + self.i18n.slice(
+                    "formatted_task_instructions"
+                ).format(output_format=schema)
 
         if context:
             task_prompt = self.i18n.slice("task_with_context").format(
@@ -226,8 +207,8 @@ class Agent(BaseAgent):
             if memory.strip() != "":
                 task_prompt += self.i18n.slice("memory").format(memory=memory)
 
-        if self._knowledge:
-            agent_knowledge_snippets = self._knowledge.query([task.prompt()])
+        if self.knowledge:
+            agent_knowledge_snippets = self.knowledge.query([task.prompt()])
             if agent_knowledge_snippets:
                 agent_knowledge_context = extract_knowledge_context(
                     agent_knowledge_snippets
@@ -251,6 +232,15 @@ class Agent(BaseAgent):
             task_prompt = self._use_trained_data(task_prompt=task_prompt)
 
         try:
+            crewai_event_bus.emit(
+                self,
+                event=AgentExecutionStartedEvent(
+                    agent=self,
+                    tools=self.tools,
+                    task_prompt=task_prompt,
+                    task=task,
+                ),
+            )
             result = self.agent_executor.invoke(
                 {
                     "input": task_prompt,
@@ -260,8 +250,27 @@ class Agent(BaseAgent):
                 }
             )["output"]
         except Exception as e:
+            if e.__class__.__module__.startswith("litellm"):
+                # Do not retry on litellm errors
+                crewai_event_bus.emit(
+                    self,
+                    event=AgentExecutionErrorEvent(
+                        agent=self,
+                        task=task,
+                        error=str(e),
+                    ),
+                )
+                raise e
             self._times_executed += 1
             if self._times_executed > self.max_retry_limit:
+                crewai_event_bus.emit(
+                    self,
+                    event=AgentExecutionErrorEvent(
+                        agent=self,
+                        task=task,
+                        error=str(e),
+                    ),
+                )
                 raise e
             result = self.execute_task(task, context, tools)
 
@@ -274,7 +283,10 @@ class Agent(BaseAgent):
         for tool_result in self.tools_results:  # type: ignore # Item "None" of "list[Any] | None" has no attribute "__iter__" (not iterable)
             if tool_result.get("result_as_answer", False):
                 result = tool_result["result"]
-
+        crewai_event_bus.emit(
+            self,
+            event=AgentExecutionCompletedEvent(agent=self, task=task, output=result),
+        )
         return result
 
     def create_agent_executor(
@@ -332,14 +344,14 @@ class Agent(BaseAgent):
         tools = agent_tools.tools()
         return tools
 
-    def get_multimodal_tools(self) -> List[Tool]:
+    def get_multimodal_tools(self) -> Sequence[BaseTool]:
         from crewai.tools.agent_tools.add_image_tool import AddImageTool
 
         return [AddImageTool()]
 
     def get_code_execution_tools(self):
         try:
-            from crewai_tools import CodeInterpreterTool
+            from crewai_tools import CodeInterpreterTool  # type: ignore
 
             # Set the unsafe_mode based on the code_execution_mode attribute
             unsafe_mode = self.code_execution_mode == "unsafe"
