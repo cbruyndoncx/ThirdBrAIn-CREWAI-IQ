@@ -98,3 +98,13 @@ This repository contains the following submodules:
 - **Last Updated**: 2024-12-09T14:27:28Z
 - **Languages Used**: Python, HTML
 - **Number of Releases**: 0
+# CREWAI
+
+This repository contains the following submodules:
+
+## [jeanjerome/ai-agile-team](https://github.com/jeanjerome/ai-agile-team)
+- **Description**: An innovative Python project that integrates AI-driven agents for Agile software development, leveraging advanced language models and collaborative task automation.
+- **Last Updated**: 2025-01-06T04:18:06Z
+- **Languages Used**: Python
+- **Number of Releases**: 0
+
