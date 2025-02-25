@@ -1,17 +1,25 @@
-import os
-from typing import TYPE_CHECKING, Any, Dict, Optional, Type
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Dict, Optional, Type
 
 from crewai.tools import BaseTool
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-# Type checking import
-if TYPE_CHECKING:
+
+try:
     from firecrawl import FirecrawlApp
+except ImportError:
+    FirecrawlApp = Any
 
 
 class FirecrawlCrawlWebsiteToolSchema(BaseModel):
     url: str = Field(description="Website URL")
+    crawler_options: Optional[Dict[str, Any]] = Field(
+        default=None, description="Options for crawling"
+    )
+    timeout: Optional[int] = Field(
+        default=30000,
+        description="Timeout in milliseconds for the crawling operation. The default value is 30000.",
+    )
+
 
 class FirecrawlCrawlWebsiteTool(BaseTool):
     model_config = ConfigDict(
@@ -20,64 +28,63 @@ class FirecrawlCrawlWebsiteTool(BaseTool):
     name: str = "Firecrawl web crawl tool"
     description: str = "Crawl webpages using Firecrawl and return the contents"
     args_schema: Type[BaseModel] = FirecrawlCrawlWebsiteToolSchema
-    firecrawl_app: Optional["FirecrawlApp"] = None
     api_key: Optional[str] = None
-    url: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
-    poll_interval: Optional[int] = 2
-    idempotency_key: Optional[str] = None
+    _firecrawl: Optional["FirecrawlApp"] = PrivateAttr(None)
 
     def __init__(self, api_key: Optional[str] = None, **kwargs):
-        """Initialize FirecrawlCrawlWebsiteTool.
-
-        Args:
-            api_key (Optional[str]): Firecrawl API key. If not provided, will check FIRECRAWL_API_KEY env var.
-            url (Optional[str]): Base URL to crawl. Can be overridden by the _run method.
-            firecrawl_app (Optional[FirecrawlApp]): Previously created FirecrawlApp instance.
-            params (Optional[Dict[str, Any]]): Additional parameters to pass to the FirecrawlApp.
-            poll_interval (Optional[int]): Poll interval for the FirecrawlApp.
-            idempotency_key (Optional[str]): Idempotency key for the FirecrawlApp.
-            **kwargs: Additional arguments passed to BaseTool.
-        """
         super().__init__(**kwargs)
+        self.api_key = api_key
+        self._initialize_firecrawl()
+
+    def _initialize_firecrawl(self) -> None:
         try:
             from firecrawl import FirecrawlApp  # type: ignore
+
+            self._firecrawl = FirecrawlApp(api_key=self.api_key)
         except ImportError:
-            raise ImportError(
-                "`firecrawl` package not found, please run `pip install firecrawl-py`"
-            )
+            import click
 
-        # Allows passing a previously created FirecrawlApp instance
-        # or builds a new one with the provided API key
-        if not self.firecrawl_app:
-            client_api_key = api_key or os.getenv("FIRECRAWL_API_KEY")    
-            if not client_api_key:
-                raise ValueError(
-                    "FIRECRAWL_API_KEY is not set. Please provide it either via the constructor "
-                    "with the `api_key` argument or by setting the FIRECRAWL_API_KEY environment variable."
+            if click.confirm(
+                "You are missing the 'firecrawl-py' package. Would you like to install it?"
+            ):
+                import subprocess
+
+                try:
+                    subprocess.run(["uv", "add", "firecrawl-py"], check=True)
+                    from firecrawl import FirecrawlApp
+
+                    self._firecrawl = FirecrawlApp(api_key=self.api_key)
+                except subprocess.CalledProcessError:
+                    raise ImportError("Failed to install firecrawl-py package")
+            else:
+                raise ImportError(
+                    "`firecrawl-py` package not found, please run `uv add firecrawl-py`"
                 )
-            self.firecrawl_app = FirecrawlApp(api_key=client_api_key)
 
-    def _run(self, url: str):
-        # Unless url has been previously set via constructor by the user,
-        # use the url argument provided by the agent at runtime.
-        base_url = self.url or url
+    def _run(
+        self,
+        url: str,
+        crawler_options: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = 30000,
+    ):
+        if crawler_options is None:
+            crawler_options = {}
 
-        return self.firecrawl_app.crawl_url(
-            base_url, 
-            params=self.params, 
-            poll_interval=self.poll_interval, 
-            idempotency_key=self.idempotency_key
-        )
+        options = {
+            "crawlerOptions": crawler_options,
+            "timeout": timeout,
+        }
+        return self._firecrawl.crawl_url(url, options)
 
 
 try:
     from firecrawl import FirecrawlApp
 
-    # Must rebuild model after class is defined
-    FirecrawlCrawlWebsiteTool.model_rebuild()
+    # Only rebuild if the class hasn't been initialized yet
+    if not hasattr(FirecrawlCrawlWebsiteTool, "_model_rebuilt"):
+        FirecrawlCrawlWebsiteTool.model_rebuild()
+        FirecrawlCrawlWebsiteTool._model_rebuilt = True
 except ImportError:
     """
     When this tool is not used, then exception can be ignored.
     """
-    pass
