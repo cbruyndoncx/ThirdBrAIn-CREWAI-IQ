@@ -2,67 +2,85 @@ import sqlite3
 import os
 import json
 from my_tools import TOOL_CLASSES
+from sqlalchemy import create_engine, text
 
-DB_NAME = 'crewai.db'
+# If you have an environment variable DB_URL for Postgres, use that. 
+# Otherwise, fallback to local SQLite file: 'sqlite:///crewai.db'
+DEFAULT_SQLITE_URL = 'sqlite:///crewai.db'
+DB_URL = os.getenv('DB_URL', DEFAULT_SQLITE_URL)
+
+# Create a SQLAlchemy Engine.
+# For example, DB_URL could be:
+#   "postgresql://username:password@hostname:5432/dbname"
+# or fallback to: "sqlite:///crewai.db"
+engine = create_engine(DB_URL, echo=False)
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # conn = sqlite3.connect(DB_NAME)
+    # conn.row_factory = sqlite3.Row
+    # return conn
+    """
+    Return a context-managed connection from the SQLAlchemy engine.
+    """
+    return engine.connect()
 
 def create_tables():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
+    create_sql = text('''
         CREATE TABLE IF NOT EXISTS entities (
             id TEXT PRIMARY KEY,
             entity_type TEXT,
             data TEXT
         )
     ''')
-    
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        conn.execute(create_sql)
+        conn.commit()
 
 def initialize_db():
-    if not os.path.exists(DB_NAME):
-        create_tables()
-    else:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT name FROM sqlite_master WHERE type="table" AND name="entities"')
-        table_exists = cursor.fetchone()
-        if not table_exists:
-            create_tables()
-        conn.close()
+    """
+    Initialize the database by creating tables if they do not exist.
+    """
+    create_tables()
+
 
 def save_entity(entity_type, entity_id, data):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO entities (id, entity_type, data)
-        VALUES (?, ?, ?)
-    ''', (entity_id, entity_type, json.dumps(data)))
-    conn.commit()
-    conn.close()
+    # For SQLite ≥ 3.24 and for Postgres, we can do:
+    #   INSERT ... ON CONFLICT(id) DO UPDATE ...
+    # to emulate "INSERT OR REPLACE"
+    upsert_sql = text('''
+        INSERT INTO entities (id, entity_type, data)
+        VALUES (:id, :etype, :data)
+        ON CONFLICT(id) DO UPDATE
+            SET entity_type = EXCLUDED.entity_type,
+                data = EXCLUDED.data
+    ''')
+    with get_db_connection() as conn:
+        conn.execute(
+            upsert_sql,
+            {
+                "id": entity_id,
+                "etype": entity_type,
+                "data": json.dumps(data),
+            }
+        )
+        conn.commit()
 
 def load_entities(entity_type):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM entities WHERE entity_type = ?', (entity_type,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [(row['id'], json.loads(row['data'])) for row in rows]
+    query = text('SELECT id, data FROM entities WHERE entity_type = :etype')
+    with get_db_connection() as conn:
+        result = conn.execute(query, {"etype": entity_type})
+        # result.mappings() gives us rows as dicts (if using SQLAlchemy 1.4+)
+        rows = result.mappings().all()
+    return [(row["id"], json.loads(row["data"])) for row in rows]
 
 def delete_entity(entity_type, entity_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        DELETE FROM entities WHERE id = ? AND entity_type = ?
-    ''', (entity_id, entity_type))
-    conn.commit()
-    conn.close()
+    delete_sql = text('''
+        DELETE FROM entities
+        WHERE id = :id AND entity_type = :etype
+    ''')
+    with get_db_connection() as conn:
+        conn.execute(delete_sql, {"id": entity_id, "etype": entity_type})
+        conn.commit()
 
 def save_tools_state(enabled_tools):
     data = {
@@ -204,36 +222,80 @@ def delete_tool(tool_id):
     delete_entity('tool', tool_id)
 
 def export_to_json(file_path):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM entities')
-    rows = cursor.fetchall()
-    conn.close()
+    with get_db_connection() as conn:
+        # Use SQLAlchemy's text() for raw SQL
+        query = text('SELECT * FROM entities')
+        result = conn.execute(query)
+        
+        # Convert to list of dictionaries
+        rows = [
+            {
+                'id': row.id,
+                'entity_type': row.entity_type,
+                'data': json.loads(row.data)
+            }
+            for row in result
+        ]
 
-    data = []
-    for row in rows:
-        entity = {
-            'id': row['id'],
-            'entity_type': row['entity_type'],
-            'data': json.loads(row['data'])
-        }
-        data.append(entity)
-
-    with open(file_path, 'w') as f:
-        json.dump(data, f, indent=4)
+        # Write to file
+        with open(file_path, 'w') as f:
+            json.dump(rows, f, indent=4)
 
 def import_from_json(file_path):
     with open(file_path, 'r') as f:
         data = json.load(f)
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    for entity in data:
-        cursor.execute('''
-            INSERT OR REPLACE INTO entities (id, entity_type, data)
-            VALUES (?, ?, ?)
-        ''', (entity['id'], entity['entity_type'], json.dumps(entity['data'])))
+    with get_db_connection() as conn:
+        for entity in data:
+            # Use SQLAlchemy's text() for raw SQL with parameters
+            upsert_sql = text('''
+                INSERT INTO entities (id, entity_type, data)
+                VALUES (:id, :etype, :data)
+                ON CONFLICT(id) DO UPDATE
+                    SET entity_type = EXCLUDED.entity_type,
+                        data = EXCLUDED.data
+            ''')
+            
+            conn.execute(
+                upsert_sql,
+                {
+                    "id": entity['id'],
+                    "etype": entity['entity_type'],
+                    "data": json.dumps(entity['data'])
+                }
+            )
+            
+        conn.commit()
+        
+def save_result(result):
+    """Save a result to the database."""
+    data = {
+        'crew_id': result.crew_id,
+        'crew_name': result.crew_name,
+        'inputs': result.inputs,
+        'result': result.result,
+        'created_at': result.created_at
+    }
+    save_entity('result', result.id, data)
 
-    conn.commit()
-    conn.close()
+def load_results():
+    """Load all results from the database."""
+    from result import Result
+    rows = load_entities('result')
+    results = []
+    for row in rows:
+        data = row[1]
+        result = Result(
+            id=row[0],
+            crew_id=data['crew_id'],
+            crew_name=data['crew_name'],
+            inputs=data['inputs'],
+            result=data['result'],
+            created_at=data['created_at']
+        )
+        results.append(result)
+    return sorted(results, key=lambda x: x.created_at, reverse=True)
+
+def delete_result(result_id):
+    """Delete a result from the database."""
+    delete_entity('result', result_id)

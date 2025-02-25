@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/strnad/CrewAI-Studio.git
 	branch = main
-	commit = dc23ec1156103b9aa3439937b512621d8151a7c5
-	parent = 9dc1b4583b942318b8fa8d5877adc48e3568b218
+	commit = e4b537d99932b36a9c06433d612fc9b35f711dbf
+	parent = b97ebc8851a351e5585e8ec7af740a5b562b43ac
 	method = merge
 	cmdver = 0.4.9
