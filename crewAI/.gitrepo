@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/crewAIInc/crewAI.git
 	branch = main
-	commit = 34d299345677c7ce26b1368f240c559596526fa7
-	parent = ee8df230631ed91192a64ab35a582b7eace94f30
+	commit = 00eede0d5d7b9ea591d939689e8e05f89f9d975d
+	parent = 43f040de493384609be1c8fe2e34836a8fefad3a
 	method = merge
 	cmdver = 0.4.9
